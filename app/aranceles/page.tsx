@@ -1,6 +1,9 @@
 import { prisma } from "@/lib/prisma"
 import { TreatmentManager } from "@/components/TreatmentManager"
 
+// Lee datos de la base en cada request (no se prerenderiza en el build)
+export const dynamic = "force-dynamic"
+
 export default async function ArancelesPage() {
   // Obtenemos todos los tratamientos desde PostgreSQL
   const treatments = await prisma.treatment.findMany({

@@ -19,6 +19,7 @@ interface DuplicatePatient {
   firstName: string
   lastName: string
   birthDate?: Date | null
+  active?: boolean
 }
 
 export function PatientForm({ patientId, initialData, onSuccess }: PatientFormProps) {
@@ -31,6 +32,7 @@ export function PatientForm({ patientId, initialData, onSuccess }: PatientFormPr
 
   // Estado para gestionar si se detecta un paciente inactivo por RUT
   const [inactivePatient, setInactivePatient] = useState<DuplicatePatient | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
 
   const {
     register,
@@ -47,12 +49,16 @@ export function PatientForm({ patientId, initialData, onSuccess }: PatientFormPr
 
   // Función para ejecutar la creación o edición del paciente
   async function executeSave(data: PatientFormData) {
-    let result
+    if (isSaving) return
+    setIsSaving(true)
 
-    if (isEditing && patientId) {
-      result = await updatePatient(patientId, data)
-    } else {
-      result = await createPatient(data)
+    let result
+    try {
+      result = isEditing && patientId ? await updatePatient(patientId, data) : await createPatient(data)
+    } catch {
+      result = { success: false as const, error: "Error de conexión al guardar el paciente." }
+    } finally {
+      setIsSaving(false)
     }
 
     if (result.success) {
@@ -68,7 +74,8 @@ export function PatientForm({ patientId, initialData, onSuccess }: PatientFormPr
       }
     } else {
       // Manejo de respuesta cuando el RUT ingresado pertenece a un paciente inactivo
-      if (result.isInactive && result.existingPatient) {
+      setShowDuplicateWarning(false)
+      if ("isInactive" in result && result.isInactive && result.existingPatient) {
         setInactivePatient(result.existingPatient)
       } else {
         alert(result.error)
@@ -232,10 +239,10 @@ export function PatientForm({ patientId, initialData, onSuccess }: PatientFormPr
         <div className="flex justify-end pt-2">
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isSaving}
             className="bg-blue-600 text-white font-extrabold px-6 py-2.5 rounded-xl hover:bg-blue-700 disabled:bg-blue-300 transition-colors shadow-sm"
           >
-            {isSubmitting
+            {isSubmitting || isSaving
               ? "Validando y Guardando..."
               : isEditing
               ? "Actualizar Paciente"
@@ -260,11 +267,14 @@ export function PatientForm({ patientId, initialData, onSuccess }: PatientFormPr
             <div className="space-y-2 mb-6 max-h-48 overflow-y-auto">
               {duplicates.map((dup) => (
                 <div key={dup.id} className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-sm">
-                  <p className="font-bold text-gray-900">{dup.firstName} {dup.lastName}</p>
+                  <p className="font-bold text-gray-900">
+                    {dup.firstName} {dup.lastName}
+                    {dup.active === false && <span className="ml-2 text-xs text-red-600">(Inactivo)</span>}
+                  </p>
                   <p className="text-xs text-gray-600 font-mono">RUT: {dup.rut}</p>
                   {dup.birthDate && (
                     <p className="text-xs text-gray-500">
-                      Nacimiento: {new Date(dup.birthDate).toLocaleDateString("es-CL")}
+                      Nacimiento: {new Date(dup.birthDate).toLocaleDateString("es-CL", { timeZone: "UTC" })}
                     </p>
                   )}
                 </div>
@@ -289,9 +299,10 @@ export function PatientForm({ patientId, initialData, onSuccess }: PatientFormPr
               <button
                 type="button"
                 onClick={() => pendingData && executeSave(pendingData)}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl transition-colors shadow-sm"
+                disabled={isSaving}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-300 text-white font-bold text-xs rounded-xl transition-colors shadow-sm"
               >
-                Registrar De Todas Formas
+                {isSaving ? "Guardando..." : "Registrar De Todas Formas"}
               </button>
             </div>
           </div>

@@ -1,6 +1,9 @@
 import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 
+// Lee datos de la base en cada request (no se prerenderiza en el build)
+export const dynamic = "force-dynamic"
+
 // Definimos la interfaz con los campos opcionales del usuario
 interface ProfessionalUser {
   id: string

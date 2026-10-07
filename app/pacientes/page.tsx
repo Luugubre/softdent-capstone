@@ -10,7 +10,8 @@ export default async function PacientesPage({
   searchParams: Promise<{ q?: string }>;
 }) {
   const query = (await searchParams)?.q?.trim() || "";
-  const cleanSearchRut = query.replace(/[^0-9kK]/g, "").toUpperCase();
+  // Solo se busca por RUT si la consulta contiene dígitos (evita que "Karla" busque RUTs con K)
+  const cleanSearchRut = /\d/.test(query) ? query.replace(/[^0-9kK]/g, "").toUpperCase() : "";
 
   const whereCondition = query
     ? {

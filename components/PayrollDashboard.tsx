@@ -45,7 +45,7 @@ export function PayrollDashboard() {
 
     async function fetchData() {
       try {
-        const result = await getDashboardStats()
+        const result = await getDashboardStats(month, year)
         if (isMounted) {
           if (result.success) {
             setStats(result as DashboardStats)
