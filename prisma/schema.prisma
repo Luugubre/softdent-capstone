@@ -14,43 +14,62 @@ enum Role {
 }
 
 model User {
-  id           String        @id @default(uuid())
-  email        String        @unique
-  name         String
-  role         Role          @default(DENTISTA)
-  commission   Float         @default(40.0)
-  
-  appointments Appointment[]
-  budgets      Budget[]
-  payrolls     Payroll[]
-  createdAt    DateTime      @default(now())
+  id         String @id @default(uuid())
+  email      String @unique
+  name       String
+  role       Role   @default(DENTISTA)
+  commission Float  @default(40.0)
+
+  appointments  Appointment[]
+  budgets       Budget[]
+  payrolls      Payroll[]
+  evolutions    Evolution[]
+  prescriptions Prescription[]
+  documents     PatientDocument[]
+  createdAt     DateTime          @default(now())
 }
 
 model Patient {
-  id           String        @id @default(uuid())
-  rut          String        @unique
-  firstName    String
-  lastName     String
-  email        String?       @unique
-  phone        String?
+  id        String    @id @default(uuid())
+  rut       String    @unique // RUT normalizado (sin puntos, con guion)
+  firstName String
+  lastName  String
+  email     String? // Se quita @unique para permitir opcionalidad/avisos
+  phone     String?
+  birthDate DateTime? // Necesario para coincidencia probable de duplicados
+  prevision String    @default("Particular") // Relacionado con los catálogos
+  active    Boolean   @default(true) // Control para desactivación lógica
+
   odontogram   Json?
   appointments Appointment[]
   budgets      Budget[]
-  createdAt    DateTime      @default(now())
+
+  // Ficha clínica
+  medicalHistory MedicalHistory?
+  files          PatientFile[]
+  consents       Consent[]
+  documents      PatientDocument[]
+  evolutions     Evolution[]
+  prescriptions  Prescription[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt // <-- Agrega @default(now())
+
+  @@index([firstName, lastName]) // Índice para optimizar búsquedas por nombre
 }
 
 model Appointment {
-  id        String   @id @default(uuid())
-  date      DateTime
-  duration  Int      @default(30)
-  status    String   @default("AGENDADO")
-  notes     String?
+  id       String   @id @default(uuid())
+  date     DateTime
+  duration Int      @default(30)
+  status   String   @default("AGENDADO")
+  notes    String?
 
   patientId String
-  patient   Patient  @relation(fields: [patientId], references: [id])
+  patient   Patient @relation(fields: [patientId], references: [id])
 
   dentistId String
-  dentist   User     @relation(fields: [dentistId], references: [id])
+  dentist   User   @relation(fields: [dentistId], references: [id])
 
   createdAt DateTime @default(now())
 }
@@ -63,42 +82,50 @@ model Treatment {
   items    BudgetItem[]
 }
 
+// Plan de tratamiento (presupuesto) con nombre, sus prestaciones y pagos
 model Budget {
-  id        String       @id @default(uuid())
-  total     Int          @default(0)
-  paid      Int          @default(0)
-  status    String       @default("PENDIENTE")
-  
+  id     String  @id @default(uuid())
+  name   String  @default("Plan de tratamiento")
+  notes  String?
+  total  Int     @default(0)
+  paid   Int     @default(0)
+  status String  @default("PENDIENTE")
+
   patientId String
-  patient   Patient      @relation(fields: [patientId], references: [id])
-  
+  patient   Patient @relation(fields: [patientId], references: [id])
+
   dentistId String
-  dentist   User         @relation(fields: [dentistId], references: [id])
-  
-  items     BudgetItem[]
-  payments  Payment[]
-  createdAt DateTime     @default(now())
+  dentist   User   @relation(fields: [dentistId], references: [id])
+
+  items      BudgetItem[]
+  payments   Payment[]
+  evolutions Evolution[]
+  consents   Consent[]
+  createdAt  DateTime     @default(now())
 }
 
 model Payment {
-  id        String   @id @default(uuid())
-  amount    Int
-  method    String
-  
-  budgetId  String
-  budget    Budget   @relation(fields: [budgetId], references: [id])
-  
+  id     String @id @default(uuid())
+  amount Int
+  method String
+
+  budgetId String
+  budget   Budget @relation(fields: [budgetId], references: [id])
+
   createdAt DateTime @default(now())
 }
 
 model BudgetItem {
   id          String    @id @default(uuid())
   tooth       Int?
+  surfaces    String[]  @default([]) // Caras afectadas (vestibular, palatine, mesial, distal, oclusal)
   price       Int
-  
-  budgetId    String
-  budget      Budget    @relation(fields: [budgetId], references: [id], onDelete: Cascade)
-  
+  status      String    @default("PENDIENTE") // PENDIENTE | REALIZADO
+  completedAt DateTime?
+
+  budgetId String
+  budget   Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
   treatmentId String
   treatment   Treatment @relation(fields: [treatmentId], references: [id])
 }
@@ -106,12 +133,118 @@ model BudgetItem {
 model Payroll {
   id        String    @id @default(uuid())
   period    String
-  totalPaid Int      
+  totalPaid Int
   status    String    @default("BORRADOR")
   closedAt  DateTime?
-  
+
   dentistId String
-  dentist   User      @relation(fields: [dentistId], references: [id])
-  
-  createdAt DateTime  @default(now())
+  dentist   User   @relation(fields: [dentistId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+// --- FICHA CLÍNICA DEL PACIENTE ---
+
+model MedicalHistory {
+  id        String  @id @default(uuid())
+  patientId String  @unique
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  conditions   String[] @default([]) // Enfermedades sistémicas marcadas en el checklist
+  allergies    String?
+  medications  String?
+  surgeries    String?
+  habits       String?
+  smoker       Boolean  @default(false)
+  pregnant     Boolean  @default(false)
+  observations String?
+
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
+model PatientFile {
+  id        String  @id @default(uuid())
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  name     String
+  category String  @default("RADIOGRAFIA") // RADIOGRAFIA | FOTO | EXAMEN | OTRO
+  mimeType String
+  size     Int
+  data     Bytes
+  notes    String?
+
+  createdAt DateTime @default(now())
+
+  @@index([patientId])
+}
+
+model Consent {
+  id        String  @id @default(uuid())
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  budgetId String?
+  budget   Budget? @relation(fields: [budgetId], references: [id], onDelete: SetNull)
+
+  title    String
+  content  String
+  status   String    @default("PENDIENTE") // PENDIENTE | FIRMADO | RECHAZADO
+  signedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([patientId])
+}
+
+model PatientDocument {
+  id        String  @id @default(uuid())
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  dentistId String?
+  dentist   User?   @relation(fields: [dentistId], references: [id])
+
+  type    String @default("CERTIFICADO") // CERTIFICADO | INFORME | OTRO
+  title   String
+  content String
+
+  createdAt DateTime @default(now())
+
+  @@index([patientId])
+}
+
+model Evolution {
+  id        String  @id @default(uuid())
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  dentistId String?
+  dentist   User?   @relation(fields: [dentistId], references: [id])
+
+  budgetId String?
+  budget   Budget? @relation(fields: [budgetId], references: [id], onDelete: SetNull)
+
+  date    DateTime @default(now())
+  content String
+
+  createdAt DateTime @default(now())
+
+  @@index([patientId])
+}
+
+model Prescription {
+  id        String  @id @default(uuid())
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  dentistId String?
+  dentist   User?   @relation(fields: [dentistId], references: [id])
+
+  medications  Json // [{ name, dose, frequency, duration }]
+  instructions String?
+
+  createdAt DateTime @default(now())
+
+  @@index([patientId])
 }

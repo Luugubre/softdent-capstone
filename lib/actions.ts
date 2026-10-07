@@ -1,21 +1,67 @@
-"use server"
+"use server";
 
-import { prisma } from "./prisma"
-import { OdontogramData } from "@/types/clinical"
+import { revalidatePath } from "next/cache";
+import { Prisma, Patient } from "@prisma/client";
+import { prisma } from "./prisma";
+import { cleanAndValidateRut, normalizePhone, patientSchema, PatientFormData } from "./schemas";
+
+// --- TIPOS DE RETORNO PARA PACIENTES ---
+export type PatientActionResult =
+  | { success: true; patient?: Patient }
+  | {
+      success: false;
+      error: string;
+      isInactive?: boolean;
+      existingPatient?: Patient | null;
+    };
+
+function isUniqueConstraintError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+// Convierte "YYYY-MM-DD" a fecha UTC (evita corrimientos de día por zona horaria)
+function parseBirthDate(value?: string) {
+  if (!value) return null;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return isNaN(date.getTime()) ? null : date;
+}
+
+// Valida en el servidor y deja los datos listos para guardar
+function preparePatientData(data: PatientFormData) {
+  const parsed = patientSchema.safeParse(data);
+  if (!parsed.success) {
+    return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos del paciente inválidos." };
+  }
+
+  const values = parsed.data;
+  return {
+    ok: true as const,
+    data: {
+      rut: cleanAndValidateRut(values.rut).formatted,
+      firstName: values.firstName.trim(),
+      lastName: values.lastName.trim(),
+      email: values.email ? values.email.trim().toLowerCase() : null,
+      phone: values.phone ? normalizePhone(values.phone) : null,
+      prevision: values.prevision,
+      birthDate: parseBirthDate(values.birthDate),
+    },
+  };
+}
 
 // --- VALIDACIONES DE UNICIDAD Y VERIFICACIONES EN TIEMPO REAL ---
 
 export async function checkRutExists(rut: string, excludeId?: string) {
   try {
+    const { formatted } = cleanAndValidateRut(rut);
     const patient = await prisma.patient.findFirst({
       where: {
-        rut: rut,
+        rut: formatted || rut,
         ...(excludeId ? { id: { not: excludeId } } : {}),
       },
     });
-    return { exists: !!patient };
-  } catch (error) {
-    return { exists: false };
+    return { exists: !!patient, patient };
+  } catch {
+    return { exists: false, patient: null };
   }
 }
 
@@ -23,12 +69,12 @@ export async function checkPatientEmailExists(email: string, excludeId?: string)
   try {
     const patient = await prisma.patient.findFirst({
       where: {
-        email: email,
+        email: { equals: email.trim(), mode: "insensitive" },
         ...(excludeId ? { id: { not: excludeId } } : {}),
       },
     });
     return { exists: !!patient };
-  } catch (error) {
+  } catch {
     return { exists: false };
   }
 }
@@ -37,12 +83,12 @@ export async function checkPhoneExists(phone: string, excludeId?: string) {
   try {
     const patient = await prisma.patient.findFirst({
       where: {
-        phone: phone,
+        phone: normalizePhone(phone),
         ...(excludeId ? { id: { not: excludeId } } : {}),
       },
     });
     return { exists: !!patient };
-  } catch (error) {
+  } catch {
     return { exists: false };
   }
 }
@@ -56,48 +102,177 @@ export async function checkEmailExists(email: string, excludeId?: string) {
       },
     });
     return { exists: !!user };
-  } catch (error) {
+  } catch {
     return { exists: false };
   }
 }
 
 // --- PACIENTES ---
 
-export async function createPatient(data: {
-  rut: string;
-  firstName: string;
-  lastName: string;
-  email?: string;
-  phone?: string;
-}) {
+// Detección de duplicados probables: mismo nombre y apellido, o misma fecha de nacimiento con nombre o apellido coincidente
+export async function checkDuplicatePatient(firstName: string, lastName: string, birthDate?: string) {
   try {
-    const newPatient = await prisma.patient.create({
-      data: {
-        rut: data.rut,
-        firstName: data.firstName,
-        lastName: data.lastName,
-        email: data.email || null,
-        phone: data.phone || null,
-        odontogram: {} 
-      }
+    const cleanFirstName = firstName.trim();
+    const cleanLastName = lastName.trim();
+    const birth = parseBirthDate(birthDate);
+
+    const duplicates = await prisma.patient.findMany({
+      where: {
+        OR: [
+          {
+            AND: [
+              { firstName: { contains: cleanFirstName, mode: "insensitive" } },
+              { lastName: { contains: cleanLastName, mode: "insensitive" } },
+            ],
+          },
+          ...(birth
+            ? [
+                {
+                  birthDate: birth,
+                  OR: [
+                    { firstName: { contains: cleanFirstName, mode: "insensitive" as const } },
+                    { lastName: { contains: cleanLastName, mode: "insensitive" as const } },
+                  ],
+                },
+              ]
+            : []),
+        ],
+      },
+      select: {
+        id: true,
+        rut: true,
+        firstName: true,
+        lastName: true,
+        birthDate: true,
+        active: true,
+      },
+      take: 10,
     });
-    
-    return { success: true, patient: newPatient };
+
+    return { success: true, duplicates };
   } catch (error) {
-    console.error("Error al crear paciente:", error);
-    return { success: false, error: "No se pudo registrar el paciente. Verifique los datos o si ya existe." };
+    console.error("Error al comprobar duplicados:", error);
+    return { success: false, duplicates: [] };
   }
 }
 
-export async function updateOdontogram(patientId: string, odontogramData: OdontogramData) {
+export async function createPatient(data: PatientFormData): Promise<PatientActionResult> {
+  const prepared = preparePatientData(data);
+  if (!prepared.ok) return { success: false, error: prepared.error };
+
+  try {
+    const existingPatient = await prisma.patient.findUnique({
+      where: { rut: prepared.data.rut },
+    });
+
+    if (existingPatient) {
+      if (existingPatient.active) {
+        return {
+          success: false,
+          error: `El RUT ya pertenece al paciente activo: ${existingPatient.firstName} ${existingPatient.lastName}.`,
+          existingPatient,
+        };
+      }
+      return {
+        success: false,
+        isInactive: true,
+        error: `El RUT pertenece a un paciente inactivo (${existingPatient.firstName} ${existingPatient.lastName}). ¿Deseas reactivarlo?`,
+        existingPatient,
+      };
+    }
+
+    const newPatient = await prisma.patient.create({
+      data: { ...prepared.data, active: true },
+    });
+
+    revalidatePath("/pacientes");
+    revalidatePath("/agenda");
+    return { success: true, patient: newPatient };
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      return { success: false, error: "Ya existe un paciente registrado con ese RUT." };
+    }
+    console.error("Error al crear paciente:", error);
+    return { success: false, error: "No se pudo registrar el paciente." };
+  }
+}
+
+export async function updatePatient(patientId: string, data: PatientFormData): Promise<PatientActionResult> {
+  const prepared = preparePatientData(data);
+  if (!prepared.ok) return { success: false, error: prepared.error };
+
+  try {
+    const rutOwner = await prisma.patient.findFirst({
+      where: { rut: prepared.data.rut, id: { not: patientId } },
+    });
+    if (rutOwner) {
+      return {
+        success: false,
+        error: `El RUT ya pertenece a otro paciente: ${rutOwner.firstName} ${rutOwner.lastName}.`,
+      };
+    }
+
+    const updatedPatient = await prisma.patient.update({
+      where: { id: patientId },
+      data: prepared.data,
+    });
+
+    revalidatePath("/pacientes");
+    revalidatePath(`/pacientes/${patientId}`, "layout");
+    revalidatePath("/agenda");
+    return { success: true, patient: updatedPatient };
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      return { success: false, error: "Ya existe otro paciente registrado con ese RUT." };
+    }
+    console.error("Error al actualizar paciente:", error);
+    return { success: false, error: "No se pudo actualizar el paciente." };
+  }
+}
+
+export async function reactivatePatient(patientId: string) {
+  try {
+    await prisma.patient.update({
+      where: { id: patientId },
+      data: { active: true },
+    });
+    revalidatePath("/pacientes");
+    revalidatePath(`/pacientes/${patientId}`, "layout");
+    revalidatePath("/agenda");
+    return { success: true };
+  } catch (error) {
+    console.error("Error al reactivar paciente:", error);
+    return { success: false, error: "No se pudo reactivar el paciente." };
+  }
+}
+
+// Cambiar estado Activo / Inactivo (sin eliminación física)
+export async function togglePatientStatus(patientId: string, currentStatus: boolean) {
+  try {
+    await prisma.patient.update({
+      where: { id: patientId },
+      data: { active: !currentStatus },
+    });
+    revalidatePath("/pacientes");
+    revalidatePath(`/pacientes/${patientId}`, "layout");
+    revalidatePath("/agenda");
+    return { success: true };
+  } catch (error) {
+    console.error("Error al cambiar estado del paciente:", error);
+    return { success: false, error: "No se pudo actualizar el estado del paciente." };
+  }
+}
+
+export async function updateOdontogram(patientId: string, odontogramData: Record<string, unknown>) {
   try {
     const updatedPatient = await prisma.patient.update({
       where: { id: patientId },
       data: {
-        odontogram: odontogramData as any 
-      }
+        odontogram: odontogramData as Prisma.InputJsonValue,
+      },
     });
-    
+
+    revalidatePath(`/pacientes/${patientId}`, "layout");
     return { success: true, patient: updatedPatient };
   } catch (error) {
     console.error("Error al actualizar odontograma:", error);
@@ -109,22 +284,16 @@ export async function updateOdontogram(patientId: string, odontogramData: Odonto
 
 export async function getAppointments(startDate: Date, endDate: Date, dentistId?: string) {
   try {
-    const whereClause: any = {
-      date: { gte: startDate, lte: endDate }
-    };
-    
-    // Si se pasa un dentista específico, filtramos, si no, traemos todos (para la vista general)
-    if (dentistId) {
-      whereClause.dentistId = dentistId;
-    }
-
     const appointments = await prisma.appointment.findMany({
-      where: whereClause,
+      where: {
+        date: { gte: startDate, lte: endDate },
+        ...(dentistId ? { dentistId } : {}),
+      },
       include: {
         patient: { select: { id: true, firstName: true, lastName: true, rut: true } },
-        dentist: { select: { id: true, name: true } }
+        dentist: { select: { id: true, name: true } },
       },
-      orderBy: { date: 'asc' }
+      orderBy: { date: "asc" },
     });
 
     return { success: true, appointments };
@@ -142,7 +311,6 @@ export async function createAppointment(data: {
   notes?: string;
 }) {
   try {
-    // Validación básica: evitar agendar en el pasado
     if (data.date < new Date()) {
       return { success: false, error: "No puedes agendar citas en el pasado." };
     }
@@ -155,9 +323,10 @@ export async function createAppointment(data: {
         patientId: data.patientId,
         dentistId: data.dentistId,
         status: "AGENDADO",
-      }
+      },
     });
-    
+
+    revalidatePath("/agenda");
     return { success: true, appointment: newAppointment };
   } catch (error) {
     console.error("Error al crear cita:", error);
@@ -169,10 +338,11 @@ export async function updateAppointmentStatus(appointmentId: string, status: str
   try {
     const updated = await prisma.appointment.update({
       where: { id: appointmentId },
-      data: { status }
+      data: { status },
     });
+    revalidatePath("/agenda");
     return { success: true, appointment: updated };
-  } catch (error) {
+  } catch {
     return { success: false, error: "Error al actualizar el estado de la cita." };
   }
 }
@@ -180,59 +350,25 @@ export async function updateAppointmentStatus(appointmentId: string, status: str
 export async function deleteAppointment(appointmentId: string) {
   try {
     await prisma.appointment.delete({ where: { id: appointmentId } });
+    revalidatePath("/agenda");
     return { success: true };
-  } catch (error) {
+  } catch {
     return { success: false, error: "No se pudo cancelar la cita." };
-  }
-}
-
-// --- PRESUPUESTOS Y ARANCELES ---
-
-export async function createBudget(data: {
-  patientId: string;
-  dentistId: string;
-  items: { treatmentId: string, tooth: number | null, price: number }[];
-}) {
-  try {
-    const total = data.items.reduce((sum, item) => sum + item.price, 0);
-
-    const budget = await prisma.budget.create({
-      data: {
-        patientId: data.patientId,
-        dentistId: data.dentistId,
-        total: total,
-        items: {
-          create: data.items.map(item => ({
-            treatmentId: item.treatmentId,
-            tooth: item.tooth,
-            price: item.price
-          }))
-        }
-      }
-    });
-    
-    return { success: true, budget };
-  } catch (error) {
-    console.error("Error al crear presupuesto:", error);
-    return { success: false, error: "No se pudo generar el presupuesto clínico." };
   }
 }
 
 // --- CATÁLOGO DE ARANCELES (TRATAMIENTOS) ---
 
-export async function createTreatment(data: {
-  name: string;
-  price: number;
-  category: string;
-}) {
+export async function createTreatment(data: { name: string; price: number; category: string }) {
   try {
     const newTreatment = await prisma.treatment.create({
       data: {
         name: data.name,
         price: data.price,
-        category: data.category
-      }
+        category: data.category,
+      },
     });
+    revalidatePath("/aranceles");
     return { success: true, treatment: newTreatment };
   } catch (error) {
     console.error("Error al crear tratamiento:", error);
@@ -242,62 +378,21 @@ export async function createTreatment(data: {
 
 export async function deleteTreatment(id: string) {
   try {
-    await prisma.treatment.delete({
-      where: { id }
-    });
+    await prisma.treatment.delete({ where: { id } });
+    revalidatePath("/aranceles");
     return { success: true };
-  } catch (error) {
+  } catch {
     return { success: false, error: "No se puede eliminar porque ya está asociado a un presupuesto existente." };
   }
 }
 
-// --- PAGOS Y CAJA ---
-
-export async function registerPayment(data: {
-  budgetId: string;
-  amount: number;
-  method: string;
-}) {
-  try {
-    const payment = await prisma.payment.create({
-      data: {
-        budgetId: data.budgetId,
-        amount: data.amount,
-        method: data.method
-      }
-    });
-
-    const budget = await prisma.budget.findUnique({
-      where: { id: data.budgetId }
-    });
-
-    if (budget) {
-      const newPaidAmount = budget.paid + data.amount;
-      const newStatus = newPaidAmount >= budget.total ? "PAGADO" : "APROBADO";
-
-      await prisma.budget.update({
-        where: { id: data.budgetId },
-        data: { 
-          paid: newPaidAmount,
-          status: newStatus
-        }
-      });
-    }
-
-    return { success: true, payment };
-  } catch (error) {
-    console.error("Error al registrar pago:", error);
-    return { success: false, error: "No se pudo procesar el pago en caja." };
-  }
-}
-
-// --- LIQUIDACIONES Y EXCEL ---
+// --- LIQUIDACIONES ---
 
 export async function getPayrollDetails(dentistId: string, month: number, year: number) {
   try {
-    const periodStr = `${year}-${month.toString().padStart(2, '0')}`;
+    const periodStr = `${year}-${month.toString().padStart(2, "0")}`;
     const existingPayroll = await prisma.payroll.findFirst({
-      where: { dentistId, period: periodStr }
+      where: { dentistId, period: periodStr },
     });
 
     const startDate = new Date(year, month - 1, 1);
@@ -309,36 +404,35 @@ export async function getPayrollDetails(dentistId: string, month: number, year: 
     const payments = await prisma.payment.findMany({
       where: {
         createdAt: { gte: startDate, lt: endDate },
-        budget: { dentistId: dentistId }
+        budget: { dentistId },
       },
-      include: { 
-        budget: { 
-          include: { 
+      include: {
+        budget: {
+          include: {
             patient: true,
-            items: { include: { treatment: true } }
-          } 
-        } 
+            items: { include: { treatment: true } },
+          },
+        },
       },
-      orderBy: { createdAt: 'asc' }
+      orderBy: { createdAt: "asc" },
     });
 
     const totalCollected = payments.reduce((sum, p) => sum + p.amount, 0);
     const doctorCut = Math.round(totalCollected * (dentist.commission / 100));
 
-    const formattedPayments = payments.map(p => {
-      const treatmentNames = p.budget.items.map(item => item.treatment.name).join(", ");
-      const finalTreatments = treatmentNames.length > 0 ? treatmentNames : "Abono general";
+    const formattedPayments = payments.map((p) => {
+      const treatmentNames = p.budget.items.map((item) => item.treatment.name).join(", ");
 
       return {
         id: p.id,
         date: p.createdAt,
         patientName: `${p.budget.patient.firstName} ${p.budget.patient.lastName}`,
         patientRut: p.budget.patient.rut,
-        treatments: finalTreatments,
+        treatments: treatmentNames.length > 0 ? treatmentNames : "Abono general",
         amount: p.amount,
         method: p.method,
-        doctorEarned: Math.round(p.amount * (dentist.commission / 100))
-      }
+        doctorEarned: Math.round(p.amount * (dentist.commission / 100)),
+      };
     });
 
     return {
@@ -350,16 +444,16 @@ export async function getPayrollDetails(dentistId: string, month: number, year: 
       commissionRate: dentist.commission,
       totalCollected,
       doctorCut,
-      payments: formattedPayments
+      payments: formattedPayments,
     };
-  } catch (error) {
+  } catch {
     return { success: false, error: "Error al obtener detalles de la liquidación." };
   }
 }
 
 export async function closePayrollAction(dentistId: string, month: number, year: number, doctorCut: number) {
   try {
-    const periodStr = `${year}-${month.toString().padStart(2, '0')}`;
+    const periodStr = `${year}-${month.toString().padStart(2, "0")}`;
     const existing = await prisma.payroll.findFirst({ where: { dentistId, period: periodStr } });
 
     if (existing?.status === "CERRADA") {
@@ -371,18 +465,17 @@ export async function closePayrollAction(dentistId: string, month: number, year:
     if (existing) {
       await prisma.payroll.update({
         where: { id: existing.id },
-        data: { status: "CERRADA", closedAt: now, totalPaid: doctorCut }
+        data: { status: "CERRADA", closedAt: now, totalPaid: doctorCut },
       });
     } else {
       await prisma.payroll.create({
-        data: {
-          dentistId, period: periodStr, totalPaid: doctorCut,
-          status: "CERRADA", closedAt: now
-        }
+        data: { dentistId, period: periodStr, totalPaid: doctorCut, status: "CERRADA", closedAt: now },
       });
     }
+
+    revalidatePath("/liquidaciones");
     return { success: true };
-  } catch (error) {
+  } catch {
     return { success: false, error: "Error al realizar el corte." };
   }
 }
@@ -391,42 +484,44 @@ export async function getDashboardStats(month: number, year: number) {
   try {
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 1);
-    const periodStr = `${year}-${month.toString().padStart(2, '0')}`;
+    const periodStr = `${year}-${month.toString().padStart(2, "0")}`;
 
     const dentists = await prisma.user.findMany({ where: { role: "DENTISTA" } });
 
     let totalProduction = 0;
     let totalPending = 0;
 
-    const dentistStats = await Promise.all(dentists.map(async (dentist) => {
-      const payroll = await prisma.payroll.findFirst({
-        where: { dentistId: dentist.id, period: periodStr }
-      });
+    const dentistStats = await Promise.all(
+      dentists.map(async (dentist) => {
+        const payroll = await prisma.payroll.findFirst({
+          where: { dentistId: dentist.id, period: periodStr },
+        });
 
-      const actualEndDate = payroll?.closedAt ? payroll.closedAt : endDate;
+        const actualEndDate = payroll?.closedAt ? payroll.closedAt : endDate;
 
-      const payments = await prisma.payment.findMany({
-        where: {
-          createdAt: { gte: startDate, lt: actualEndDate },
-          budget: { dentistId: dentist.id }
-        }
-      });
+        const payments = await prisma.payment.findMany({
+          where: {
+            createdAt: { gte: startDate, lt: actualEndDate },
+            budget: { dentistId: dentist.id },
+          },
+        });
 
-      const production = payments.reduce((sum, p) => sum + p.amount, 0);
-      const liquidToPay = Math.round(production * (dentist.commission / 100));
+        const production = payments.reduce((sum, p) => sum + p.amount, 0);
+        const liquidToPay = Math.round(production * (dentist.commission / 100));
 
-      totalProduction += production;
-      totalPending += liquidToPay;
+        totalProduction += production;
+        totalPending += liquidToPay;
 
-      return {
-        id: dentist.id,
-        name: dentist.name,
-        commission: dentist.commission,
-        production,
-        liquidToPay,
-        status: payroll?.status || "BORRADOR"
-      };
-    }));
+        return {
+          id: dentist.id,
+          name: dentist.name,
+          commission: dentist.commission,
+          production,
+          liquidToPay,
+          status: payroll?.status || "BORRADOR",
+        };
+      })
+    );
 
     dentistStats.sort((a, b) => b.production - a.production);
 
@@ -435,19 +530,21 @@ export async function getDashboardStats(month: number, year: number) {
       global: {
         totalProduction,
         totalPending,
-        netMargin: totalProduction - totalPending
+        netMargin: totalProduction - totalPending,
       },
-      dentists: dentistStats
+      dentists: dentistStats,
     };
-  } catch (error) {
+  } catch {
     return { success: false, error: "Error al cargar las estadísticas del mes." };
   }
 }
 
+// --- PROFESIONALES ---
+
 export async function createProfessional(data: {
   name: string;
   email: string;
-  role: 'ADMIN' | 'DENTISTA' | 'RECEPCIONISTA';
+  role: "ADMIN" | "DENTISTA" | "RECEPCIONISTA";
   commission?: number;
 }) {
   try {
@@ -456,28 +553,24 @@ export async function createProfessional(data: {
         name: data.name,
         email: data.email,
         role: data.role,
-        commission: data.commission ?? 0, 
-      }
+        commission: data.commission ?? 0,
+      },
     });
-    
+
+    revalidatePath("/profesionales");
     return { success: true, user: newUser };
   } catch (error) {
-    console.error("Error al crear profesional:", error);
-    
-    if (error instanceof Error && error.message.includes('Unique constraint failed')) {
+    if (isUniqueConstraintError(error)) {
       return { success: false, error: "Ya existe un profesional con ese correo electrónico." };
     }
-    
+    console.error("Error al crear profesional:", error);
     return { success: false, error: "No se pudo registrar el profesional." };
   }
 }
 
 export async function getProfessionals() {
   try {
-    const professionals = await prisma.user.findMany({
-      orderBy: { name: 'asc' }
-    });
-    
+    const professionals = await prisma.user.findMany({ orderBy: { name: "asc" } });
     return { success: true, professionals };
   } catch (error) {
     console.error("Error al cargar profesionales:", error);

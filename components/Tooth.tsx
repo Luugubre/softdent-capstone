@@ -7,16 +7,23 @@ interface AdvancedToothProps {
   surfaces: ToothSurfaces;
   condition: ToothCondition;
   invert?: boolean; // Nuevo prop para invertir solo el dibujo
-  onSurfaceClick: (surface: keyof ToothSurfaces) => void;
+  onSurfaceClick?: (surface: keyof ToothSurfaces) => void;
   onRootClick?: () => void;
+  onNumberClick?: () => void;
+  // Opcionales para odontogramas de tratamientos: color por cara, pieza seleccionada y marca de pieza completa
+  fillFor?: (surface: keyof ToothSurfaces) => string | undefined;
+  selected?: boolean;
+  markerColor?: string;
 }
 
-export function Tooth({ number, surfaces, condition, invert = false, onSurfaceClick, onRootClick }: AdvancedToothProps) {
+export function Tooth({ number, surfaces, condition, invert = false, onSurfaceClick, onRootClick, onNumberClick, fillFor, selected = false, markerColor }: AdvancedToothProps) {
   const screenLeft = (number >= 11 && number <= 18) || (number >= 41 && number <= 48) || (number >= 51 && number <= 55) || (number >= 81 && number <= 85);
   const faceLeft = screenLeft ? 'distal' : 'mesial';
   const faceRight = screenLeft ? 'mesial' : 'distal';
 
-  const getFill = (status: SurfaceStatus) => {
+  const getFill = (status: SurfaceStatus, surface?: keyof ToothSurfaces) => {
+    const override = surface && fillFor ? fillFor(surface) : undefined;
+    if (override) return override;
     switch (status) {
       case "CARIES": return "#0f172a"; 
       case "RESTAURACION": return "#3b82f6"; 
@@ -44,7 +51,7 @@ export function Tooth({ number, surfaces, condition, invert = false, onSurfaceCl
 
   return (
     // NOTA: Si está invertido (inferior), usamos flex-col-reverse para que el número quede abajo de la raíz.
-    <div className={`flex items-center gap-1 group relative w-10 transition-all duration-300 ${invert ? 'flex-col-reverse' : 'flex-col'} ${isAusente ? 'opacity-40' : 'hover:scale-105'}`}>
+    <div className={`flex items-center gap-1 group relative w-10 transition-all duration-300 ${invert ? 'flex-col-reverse' : 'flex-col'} ${isAusente ? 'opacity-40' : 'hover:scale-105'} ${selected ? 'ring-2 ring-blue-500 rounded-lg bg-blue-50' : ''}`}>
       
       {/* El SVG de la raíz recibe la clase rotate-180 si invert es true */}
       <div className={`relative w-9 h-11 cursor-pointer drop-shadow-sm ${invert ? 'rotate-180' : ''}`} onClick={onRootClick}>
@@ -74,18 +81,19 @@ export function Tooth({ number, surfaces, condition, invert = false, onSurfaceCl
       </div>
       
       {/* El número ya no se rota, siempre se queda derecho */}
-      <span className="text-[10px] font-black text-gray-400 italic group-hover:text-blue-500 cursor-pointer transition-colors">
+      <span onClick={onNumberClick} className={`text-[10px] font-black italic group-hover:text-blue-500 cursor-pointer transition-colors flex items-center gap-0.5 ${selected ? 'text-blue-600' : 'text-gray-400'}`}>
         {number}
+        {markerColor && <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: markerColor }} />}
       </span>
       
       {/* El SVG de las caras recibe la clase rotate-180 si invert es true */}
       <div className={isAusente ? 'pointer-events-none' : ''}>
         <svg viewBox="0 0 100 100" className={`w-7 h-7 drop-shadow-sm ${invert ? 'rotate-180' : ''}`}>
-          <path d={paths.vestibular} fill={getFill(surfaces.vestibular)} stroke="#cbd5e1" strokeWidth="3" className="hover:opacity-70 cursor-pointer transition-colors" onClick={() => onSurfaceClick('vestibular')} />
-          <path d={paths.palatine} fill={getFill(surfaces.palatine)} stroke="#cbd5e1" strokeWidth="3" className="hover:opacity-70 cursor-pointer transition-colors" onClick={() => onSurfaceClick('palatine')} />
-          <path d={paths.left} fill={getFill(surfaces[faceLeft as keyof ToothSurfaces])} stroke="#cbd5e1" strokeWidth="3" className="hover:opacity-70 cursor-pointer transition-colors" onClick={() => onSurfaceClick(faceLeft as keyof ToothSurfaces)} />
-          <path d={paths.right} fill={getFill(surfaces[faceRight as keyof ToothSurfaces])} stroke="#cbd5e1" strokeWidth="3" className="hover:opacity-70 cursor-pointer transition-colors" onClick={() => onSurfaceClick(faceRight as keyof ToothSurfaces)} />
-          <circle cx="50" cy="50" r="20" fill={getFill(surfaces.oclusal)} stroke="#cbd5e1" strokeWidth="3" className="hover:opacity-70 cursor-pointer transition-colors" onClick={() => onSurfaceClick('oclusal')} />
+          <path d={paths.vestibular} fill={getFill(surfaces.vestibular, 'vestibular')} stroke="#cbd5e1" strokeWidth="3" className="hover:opacity-70 cursor-pointer transition-colors" onClick={() => onSurfaceClick?.('vestibular')} />
+          <path d={paths.palatine} fill={getFill(surfaces.palatine, 'palatine')} stroke="#cbd5e1" strokeWidth="3" className="hover:opacity-70 cursor-pointer transition-colors" onClick={() => onSurfaceClick?.('palatine')} />
+          <path d={paths.left} fill={getFill(surfaces[faceLeft as keyof ToothSurfaces], faceLeft as keyof ToothSurfaces)} stroke="#cbd5e1" strokeWidth="3" className="hover:opacity-70 cursor-pointer transition-colors" onClick={() => onSurfaceClick?.(faceLeft as keyof ToothSurfaces)} />
+          <path d={paths.right} fill={getFill(surfaces[faceRight as keyof ToothSurfaces], faceRight as keyof ToothSurfaces)} stroke="#cbd5e1" strokeWidth="3" className="hover:opacity-70 cursor-pointer transition-colors" onClick={() => onSurfaceClick?.(faceRight as keyof ToothSurfaces)} />
+          <circle cx="50" cy="50" r="20" fill={getFill(surfaces.oclusal, 'oclusal')} stroke="#cbd5e1" strokeWidth="3" className="hover:opacity-70 cursor-pointer transition-colors" onClick={() => onSurfaceClick?.('oclusal')} />
         </svg>
       </div>
     </div>
