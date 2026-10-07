@@ -39,7 +39,8 @@ export function OdontogramaClinico({ patientId, initialData }: Props) {
   const [isSaving, setIsSaving] = useState(false);
   
   const [odontogramaState, setOdontogramaState] = useState<OdontogramState>(
-    initialData && Object.keys(initialData).length > 0 ? initialData : generateInitialState()
+    // Se completa con el estado base para no fallar si faltan piezas en lo guardado
+    () => ({ ...generateInitialState(), ...(initialData ?? {}) })
   );
 
   const handleSurfaceClick = (toothId: number, surface: keyof ToothSurfaces) => {

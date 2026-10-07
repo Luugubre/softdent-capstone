@@ -218,7 +218,7 @@ export async function updatePatient(patientId: string, data: PatientFormData): P
     });
 
     revalidatePath("/pacientes");
-    revalidatePath(`/pacientes/${patientId}`);
+    revalidatePath(`/pacientes/${patientId}`, "layout");
     revalidatePath("/agenda");
     return { success: true, patient: updatedPatient };
   } catch (error) {
@@ -237,7 +237,7 @@ export async function reactivatePatient(patientId: string) {
       data: { active: true },
     });
     revalidatePath("/pacientes");
-    revalidatePath(`/pacientes/${patientId}`);
+    revalidatePath(`/pacientes/${patientId}`, "layout");
     revalidatePath("/agenda");
     return { success: true };
   } catch (error) {
@@ -254,7 +254,7 @@ export async function togglePatientStatus(patientId: string, currentStatus: bool
       data: { active: !currentStatus },
     });
     revalidatePath("/pacientes");
-    revalidatePath(`/pacientes/${patientId}`);
+    revalidatePath(`/pacientes/${patientId}`, "layout");
     revalidatePath("/agenda");
     return { success: true };
   } catch (error) {
@@ -272,7 +272,7 @@ export async function updateOdontogram(patientId: string, odontogramData: Record
       },
     });
 
-    revalidatePath(`/pacientes/${patientId}`);
+    revalidatePath(`/pacientes/${patientId}`, "layout");
     return { success: true, patient: updatedPatient };
   } catch (error) {
     console.error("Error al actualizar odontograma:", error);
@@ -357,39 +357,6 @@ export async function deleteAppointment(appointmentId: string) {
   }
 }
 
-// --- PRESUPUESTOS ---
-
-export async function createBudget(data: {
-  patientId: string;
-  dentistId: string;
-  items: { treatmentId: string; tooth: number | null; price: number }[];
-}) {
-  try {
-    const total = data.items.reduce((sum, item) => sum + item.price, 0);
-
-    const budget = await prisma.budget.create({
-      data: {
-        patientId: data.patientId,
-        dentistId: data.dentistId,
-        total,
-        items: {
-          create: data.items.map((item) => ({
-            treatmentId: item.treatmentId,
-            tooth: item.tooth,
-            price: item.price,
-          })),
-        },
-      },
-    });
-
-    revalidatePath(`/pacientes/${data.patientId}`);
-    return { success: true, budget };
-  } catch (error) {
-    console.error("Error al crear presupuesto:", error);
-    return { success: false, error: "No se pudo generar el presupuesto clínico." };
-  }
-}
-
 // --- CATÁLOGO DE ARANCELES (TRATAMIENTOS) ---
 
 export async function createTreatment(data: { name: string; price: number; category: string }) {
@@ -416,38 +383,6 @@ export async function deleteTreatment(id: string) {
     return { success: true };
   } catch {
     return { success: false, error: "No se puede eliminar porque ya está asociado a un presupuesto existente." };
-  }
-}
-
-// --- PAGOS Y CAJA ---
-
-export async function registerPayment(data: { budgetId: string; amount: number; method: string }) {
-  try {
-    const payment = await prisma.payment.create({
-      data: {
-        budgetId: data.budgetId,
-        amount: data.amount,
-        method: data.method,
-      },
-    });
-
-    const budget = await prisma.budget.findUnique({ where: { id: data.budgetId } });
-
-    if (budget) {
-      const newPaidAmount = budget.paid + data.amount;
-      const newStatus = newPaidAmount >= budget.total ? "PAGADO" : "APROBADO";
-
-      await prisma.budget.update({
-        where: { id: data.budgetId },
-        data: { paid: newPaidAmount, status: newStatus },
-      });
-      revalidatePath(`/pacientes/${budget.patientId}`);
-    }
-
-    return { success: true, payment };
-  } catch (error) {
-    console.error("Error al registrar pago:", error);
-    return { success: false, error: "No se pudo procesar el pago en caja." };
   }
 }
 

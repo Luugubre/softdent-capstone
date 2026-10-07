@@ -62,16 +62,22 @@ export function PatientForm({ patientId, initialData, onSuccess }: PatientFormPr
     }
 
     if (result.success) {
-      if (!isEditing) {
-        reset()
-      }
       setShowDuplicateWarning(false)
       setPendingData(null)
       setDuplicates([])
-      router.refresh()
       if (onSuccess) {
         onSuccess()
       }
+      if (!isEditing && result.patient) {
+        // Paciente nuevo: se abre directamente su ficha clínica
+        router.push(`/pacientes/${result.patient.id}`)
+        return
+      }
+      if (isEditing) {
+        alert("Datos del paciente actualizados")
+        reset(data)
+      }
+      router.refresh()
     } else {
       // Manejo de respuesta cuando el RUT ingresado pertenece a un paciente inactivo
       setShowDuplicateWarning(false)
@@ -88,13 +94,13 @@ export function PatientForm({ patientId, initialData, onSuccess }: PatientFormPr
     if (!inactivePatient) return
     const res = await reactivatePatient(inactivePatient.id)
     if (res.success) {
-      alert("Paciente reactivado exitosamente")
+      const reactivatedId = inactivePatient.id
       setInactivePatient(null)
-      reset()
-      router.refresh()
       if (onSuccess) {
         onSuccess()
       }
+      // Se abre la ficha del paciente reactivado
+      router.push(`/pacientes/${reactivatedId}`)
     } else {
       alert(res.error)
     }
