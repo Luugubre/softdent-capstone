@@ -11,54 +11,59 @@ enum Role {
   ADMIN
   DENTISTA
   RECEPCIONISTA
+  ASISTENTE
 }
 
 model User {
-  id           String        @id @default(uuid())
-  email        String        @unique
-  name         String
-  role         Role          @default(DENTISTA)
-  commission   Float         @default(40.0)
-  
+  id         String @id @default(uuid())
+  email      String @unique
+  name       String
+  role       Role   @default(DENTISTA)
+  commission Float  @default(40.0)
+
   appointments Appointment[]
   budgets      Budget[]
   payrolls     Payroll[]
   createdAt    DateTime      @default(now())
+  professional Professional?
 }
 
 model Patient {
-  id           String        @id @default(uuid())
-  rut          String        @unique // RUT normalizado (sin puntos, con guion)
-  firstName    String
-  lastName     String
-  email        String?       // Se quita @unique para permitir opcionalidad/avisos
-  phone        String?
-  birthDate    DateTime?     // Necesario para coincidencia probable de duplicados
-  prevision    String        @default("Particular") // Relacionado con los catálogos
-  active       Boolean       @default(true) // Control para desactivación lógica
+  id        String    @id @default(uuid())
+  rut       String    @unique // RUT normalizado (sin puntos, con guion)
+  firstName String
+  lastName  String
+  email     String? // Se quita @unique para permitir opcionalidad/avisos
+  phone     String?
+  birthDate DateTime? // Necesario para coincidencia probable de duplicados
+  prevision String    @default("Particular") // Relacionado con los catálogos
+  active    Boolean   @default(true) // Control para desactivación lógica
 
   odontogram   Json?
   appointments Appointment[]
   budgets      Budget[]
 
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @default(now()) @updatedAt // <-- Agrega @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt // <-- Agrega @default(now())
 
   @@index([firstName, lastName]) // Índice para optimizar búsquedas por nombre
 }
 
 model Appointment {
-  id        String   @id @default(uuid())
-  date      DateTime
-  duration  Int      @default(30)
-  status    String   @default("AGENDADO")
-  notes     String?
+  id       String   @id @default(uuid())
+  date     DateTime
+  duration Int      @default(30)
+  status   String   @default("AGENDADO")
+  notes    String?
 
   patientId String
-  patient   Patient  @relation(fields: [patientId], references: [id])
+  patient   Patient @relation(fields: [patientId], references: [id])
 
   dentistId String
-  dentist   User     @relation(fields: [dentistId], references: [id])
+  dentist   User   @relation(fields: [dentistId], references: [id])
+
+  professionalId String?
+  professional   Professional? @relation(fields: [professionalId], references: [id])
 
   createdAt DateTime @default(now())
 }
@@ -72,41 +77,41 @@ model Treatment {
 }
 
 model Budget {
-  id        String       @id @default(uuid())
-  total     Int          @default(0)
-  paid      Int          @default(0)
-  status    String       @default("PENDIENTE")
-  
+  id     String @id @default(uuid())
+  total  Int    @default(0)
+  paid   Int    @default(0)
+  status String @default("PENDIENTE")
+
   patientId String
-  patient   Patient      @relation(fields: [patientId], references: [id])
-  
+  patient   Patient @relation(fields: [patientId], references: [id])
+
   dentistId String
-  dentist   User         @relation(fields: [dentistId], references: [id])
-  
+  dentist   User   @relation(fields: [dentistId], references: [id])
+
   items     BudgetItem[]
   payments  Payment[]
   createdAt DateTime     @default(now())
 }
 
 model Payment {
-  id        String   @id @default(uuid())
-  amount    Int
-  method    String
-  
-  budgetId  String
-  budget    Budget   @relation(fields: [budgetId], references: [id])
-  
+  id     String @id @default(uuid())
+  amount Int
+  method String
+
+  budgetId String
+  budget   Budget @relation(fields: [budgetId], references: [id])
+
   createdAt DateTime @default(now())
 }
 
 model BudgetItem {
-  id          String    @id @default(uuid())
-  tooth       Int?
-  price       Int
-  
-  budgetId    String
-  budget      Budget    @relation(fields: [budgetId], references: [id], onDelete: Cascade)
-  
+  id    String @id @default(uuid())
+  tooth Int?
+  price Int
+
+  budgetId String
+  budget   Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
   treatmentId String
   treatment   Treatment @relation(fields: [treatmentId], references: [id])
 }
@@ -114,12 +119,41 @@ model BudgetItem {
 model Payroll {
   id        String    @id @default(uuid())
   period    String
-  totalPaid Int      
+  totalPaid Int
   status    String    @default("BORRADOR")
   closedAt  DateTime?
-  
+
   dentistId String
-  dentist   User      @relation(fields: [dentistId], references: [id])
-  
-  createdAt DateTime  @default(now())
+  dentist   User   @relation(fields: [dentistId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+model Specialty {
+  id            String         @id @default(uuid())
+  name          String         @unique
+  active        Boolean        @default(true)
+  professionals Professional[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model Professional {
+  id                   String     @id @default(cuid())
+  firstName            String
+  lastName             String
+  rut                  String     @unique
+  professionalRegister String     @unique
+  email                String?
+  phone                String?
+  birthDate            DateTime?
+  role                 Role       @default(DENTISTA)
+  active               Boolean    @default(true)
+  specialtyId          String?    
+  specialty            Specialty? @relation(fields: [specialtyId], references: [id]) 
+  userId               String?    @unique
+  user                 User?      @relation(fields: [userId], references: [id])
+  appointments         Appointment[]
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
 }

@@ -10,6 +10,10 @@
 !.yarn/releases
 !.yarn/versions
 
+# Archivos de sistema de Windows
+desktop.ini
+Thumbs.db
+
 # testing
 /coverage
 

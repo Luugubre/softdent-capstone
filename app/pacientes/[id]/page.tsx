@@ -23,10 +23,26 @@ export default async function FichaPaciente({ params }: { params: Promise<{ id: 
 
   if (!patient) notFound(); 
 
-  const dentists = await prisma.user.findMany({
-    where: { role: "DENTISTA" },
-    select: { id: true, name: true }
+  // ✅ CONSULTA ACTUALIZADA: Obtiene profesionales activos
+  const activeProfessionals = await prisma.professional.findMany({
+    where: { active: true },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      userId: true, // Por si BudgetBuilder requiere el userId o el id del profesional
+      specialty: {
+        select: { name: true }
+      }
+    },
+    orderBy: { firstName: 'asc' }
   });
+
+  // Mapeamos para mantener compatibilidad con el prop 'dentists' que espera BudgetBuilder
+  const dentists = activeProfessionals.map((prof) => ({
+    id: prof.userId || prof.id,
+    name: `${prof.firstName} ${prof.lastName} (${prof.specialty?.name})`
+  }));
 
   const treatments = await prisma.treatment.findMany({
     orderBy: { category: 'asc' }
