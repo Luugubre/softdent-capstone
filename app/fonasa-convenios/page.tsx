@@ -11,7 +11,7 @@ export default async function FonasaConveniosPage() {
       },
       orderBy: { createdAt: "desc" },
     }),
-    // Convenios vigentes con beneficiarios
+    // Convenios vigentes con beneficiario
     prisma.agreement.findMany({
       include: {
         beneficiaries: {
