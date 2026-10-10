@@ -45,6 +45,9 @@ model Patient {
   appointments Appointment[]
   budgets      Budget[]
   createdAt    DateTime         @default(now())
+  fonasaVouchers    FonasaVoucher[]
+  agreements        AgreementMember[]
+  agreementContracts AgreementContract[]
 }
 
 model Appointment {
@@ -79,6 +82,7 @@ model Treatment {
   category    ProcedureCategory? @relation(fields: [categoryId], references: [id])
 
   items       BudgetItem[]
+  fonasaVouchers FonasaVoucher[]
 }
 
 model Budget {
@@ -112,28 +116,56 @@ model Payment {
 }
 
 model BudgetItem {
-  id          String    @id @default(uuid())
+  id          String     @id @default(uuid())
   tooth       Int?
   price       Int
 
   budgetId    String
-  budget      Budget    @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  budget      Budget     @relation(fields: [budgetId], references: [id], onDelete: Cascade)
 
   treatmentId String
-  treatment   Treatment @relation(fields: [treatmentId], references: [id])
+  treatment   Treatment  @relation(fields: [treatmentId], references: [id])
+
+  // Relación con liquidación (para no liquidar dos veces)
+  payrollId   String?
+  payroll     Payroll?   @relation(fields: [payrollId], references: [id])
+}
+
+enum PayrollStatus {
+  BORRADOR
+  CALCULADA
+  APROBADA
+  PAGADA
+  ANULADA
 }
 
 model Payroll {
-  id        String    @id @default(uuid())
-  period    String
-  totalPaid Int
-  status    String    @default("BORRADOR")
-  closedAt  DateTime?
+  id               String         @id @default(uuid())
+  period           String         // Ej: "2026-03" o "Marzo 2026"
+  status           PayrollStatus  @default(BORRADOR)
 
-  dentistId String
-  dentist   User      @relation(fields: [dentistId], references: [id])
+  dentistId        String
+  dentist          User           @relation(fields: [dentistId], references: [id])
 
-  createdAt DateTime  @default(now())
+  // Porcentajes (deben sumar 100%)
+  dentistRate      Float          // Ej: 40.0
+  clinicRate       Float          // Ej: 60.0
+
+  // Desglose financiero
+  totalProduced    Int            @default(0) // Total recaudado en prestaciones
+  bonusAmount      Int            @default(0) // Bonificaciones (+)
+  adjustmentAmount Int            @default(0) // Ajustes (+ o -)
+  discountAmount   Int            @default(0) // Descuentos (-)
+
+  totalDentist     Int            @default(0) // Total a pagar al profesional
+  totalClinic      Int            @default(0) // Ganancia clínica
+
+  notes            String?
+  items            BudgetItem[]   // Detalle de prestaciones incluidas
+
+  closedAt         DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 }
 
 // ==========================================
@@ -276,4 +308,94 @@ model CashMovement {
   session         CashSession      @relation(fields: [sessionId], references: [id])
   
   createdAt       DateTime         @default(now())
+}
+
+// ==========================================
+// MÓDULO 5.4: FONASA Y CONVENIOS (AXEL)
+// ==========================================
+
+enum FonasaVoucherStatus {
+  PENDIENTE
+  UTILIZADO
+  ANULADO
+}
+
+// 1. Bonos FONASA
+model FonasaVoucher {
+  id              String              @id @default(uuid())
+  folio           String              @unique // Regla: Folio único, no reutilizable
+  status          FonasaVoucherStatus @default(PENDIENTE)
+  amount          Int                 // Monto bonificado por FONASA
+  copayment       Int                 @default(0) // Copago del paciente si aplica
+
+  // Regla: Asociado a paciente existente y prestación válida
+  patientId       String
+  patient         Patient             @relation(fields: [patientId], references: [id])
+
+  treatmentId     String
+  treatment       Treatment           @relation(fields: [treatmentId], references: [id])
+
+  usedAt          DateTime?
+  voidReason      String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+}
+
+// 2. Convenios (Empresas y Sindicatos)
+model Agreement {
+  id            String             @id @default(uuid())
+  name          String             @unique // Ej: "Sindicato Minera Los Pelambres"
+  institution   String             // Empresa o Sindicato
+  discountPct   Float              @default(0.0) // Porcentaje de descuento aplicado
+  startDate     DateTime
+  endDate       DateTime?
+  isActive      Boolean            @default(true) // Vigencia
+
+  beneficiaries AgreementMember[]
+  contracts     AgreementContract[]
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+}
+
+// Beneficiarios adscritos a un convenio
+model AgreementMember {
+  id          String    @id @default(uuid())
+  agreementId String
+  agreement   Agreement @relation(fields: [agreementId], references: [id])
+
+  patientId   String
+  patient     Patient   @relation(fields: [patientId], references: [id])
+
+  joinedAt    DateTime  @default(now())
+
+  @@unique([agreementId, patientId]) // Un paciente no se duplica en el mismo convenio
+}
+
+// Contratos de pago en cuotas por convenio
+model AgreementContract {
+  id          String          @id @default(uuid())
+  totalAmount Int             // Monto total pactado
+  installmentsCount Int       // Número de cuotas
+
+  agreementId String
+  agreement   Agreement       @relation(fields: [agreementId], references: [id])
+
+  patientId   String
+  patient     Patient         @relation(fields: [patientId], references: [id])
+
+  installments AgreementInstallment[]
+  createdAt   DateTime        @default(now())
+}
+
+// Cuotas asociadas a un contrato de convenio
+model AgreementInstallment {
+  id          String            @id @default(uuid())
+  number      Int               // Número de cuota (1, 2, 3...)
+  amount      Int               // Monto de la cuota
+  dueDate     DateTime          // Fecha de vencimiento
+  isPaid      Boolean           @default(false)
+  paidAt      DateTime?
+
+  contractId  String
+  contract    AgreementContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
 }
