@@ -5,8 +5,15 @@ import { BudgetBuilder } from "@/components/BudgetBuilder"
 import { PaymentModal } from "@/components/PaymentModal"
 import { EditPatientModal } from "@/components/EditPatientModal"
 
-export default async function FichaPaciente({ params }: { params: Promise<{ id: string }> }) {
+export default async function FichaPaciente({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ appointmentId?: string }>;
+}) {
   const { id } = await params;
+  const { appointmentId } = await searchParams;
 
   const patient = await prisma.patient.findUnique({
     where: { id: id },
@@ -23,14 +30,14 @@ export default async function FichaPaciente({ params }: { params: Promise<{ id: 
 
   if (!patient) notFound(); 
 
-  // ✅ CONSULTA ACTUALIZADA: Obtiene profesionales activos
+  // Obtiene profesionales activos
   const activeProfessionals = await prisma.professional.findMany({
     where: { active: true },
     select: {
       id: true,
       firstName: true,
       lastName: true,
-      userId: true, // Por si BudgetBuilder requiere el userId o el id del profesional
+      userId: true,
       specialty: {
         select: { name: true }
       }
@@ -38,11 +45,20 @@ export default async function FichaPaciente({ params }: { params: Promise<{ id: 
     orderBy: { firstName: 'asc' }
   });
 
-  // Mapeamos para mantener compatibilidad con el prop 'dentists' que espera BudgetBuilder
-  const dentists = activeProfessionals.map((prof) => ({
+ // Mapeamos manteniendo el nombre limpio (BudgetBuilder agregará el tratamiento 'Dr.')
+const dentists = activeProfessionals.map((prof) => {
+  const specialtyName =
+    typeof prof.specialty === "string"
+      ? prof.specialty
+      : prof.specialty?.name;
+
+  return {
     id: prof.userId || prof.id,
-    name: `${prof.firstName} ${prof.lastName} (${prof.specialty?.name})`
-  }));
+    name: specialtyName
+      ? `${prof.firstName} ${prof.lastName} (${specialtyName})`
+      : `${prof.firstName} ${prof.lastName}`,
+  };
+});
 
   const treatments = await prisma.treatment.findMany({
     orderBy: { category: 'asc' }
@@ -50,6 +66,27 @@ export default async function FichaPaciente({ params }: { params: Promise<{ id: 
 
   return (
     <div className="w-full min-h-screen bg-gray-50 p-4 md:p-8">
+      
+      {/* BANNER DE TRAZABILIDAD DESDE LA AGENDA */}
+      {appointmentId && (
+        <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-3">
+            <span className="flex h-3 w-3 rounded-full bg-amber-500 animate-pulse" />
+            <div>
+              <p className="text-xs font-black text-amber-900 uppercase tracking-wider">
+                Atención Dental en Curso
+              </p>
+              <p className="text-xs text-amber-800 font-medium">
+                Esta atención está vinculada a la cita de agenda <span className="font-mono font-bold">#{appointmentId.substring(0, 8)}</span>
+              </p>
+            </div>
+          </div>
+          <span className="text-[10px] font-black uppercase bg-amber-200 text-amber-900 px-3 py-1 rounded-full">
+            Trazabilidad Activa
+          </span>
+        </div>
+      )}
+
       {/* Tarjeta de Datos del Paciente con alto contraste */}
       <div className="bg-white shadow rounded-2xl p-6 mb-8 border border-gray-200 w-full">
         <div className="flex justify-between items-center mb-2">

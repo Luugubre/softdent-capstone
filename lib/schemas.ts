@@ -129,3 +129,52 @@ export const professionalSchema = z
   });
 
 export type ProfessionalFormData = z.infer<typeof professionalSchema>;
+
+// ==========================================
+// ESQUEMAS DEL MÓDULO AGENDA
+// ==========================================
+
+export const appointmentSchema = z
+  .object({
+    patientId: z.string().min(1, "Debe seleccionar un paciente"),
+    professionalId: z.string().min(1, "Debe seleccionar un profesional"),
+    boxId: z.string().min(1, "Debe seleccionar un box"),
+    procedureId: z.string().min(1, "Debe seleccionar una prestación"),
+    date: z.string().min(1, "Debe seleccionar la fecha y hora de inicio"),
+    durationMin: z.number().min(5, "La duración mínima es de 5 minutos"),
+    isOverbook: z.boolean().default(false),
+    overbookReason: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.isOverbook && (!data.overbookReason || data.overbookReason.trim() === "")) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Debe ingresar el motivo del sobrecupo",
+        path: ["overbookReason"],
+      });
+    }
+  });
+
+export type AppointmentFormData = z.infer<typeof appointmentSchema>;
+
+export const cancelAppointmentSchema = z.object({
+  cancelReason: z.string().min(3, "Debe ingresar un motivo de cancelación detallado"),
+});
+
+export type CancelAppointmentFormData = z.infer<typeof cancelAppointmentSchema>;
+
+export const scheduleBlockSchema = z
+  .object({
+    reason: z.string().min(2, "El motivo es obligatorio"),
+    type: z.enum(["VACACIONES", "REUNION", "MANTENCION", "OTRO"]),
+    startDate: z.string().min(1, "Debe indicar la fecha/hora de inicio"),
+    endDate: z.string().min(1, "Debe indicar la fecha/hora de término"),
+    professionalId: z.string().optional().nullable(),
+    boxId: z.string().optional().nullable(),
+  })
+  .refine((data) => new Date(data.endDate) > new Date(data.startDate), {
+    message: "La fecha de término debe ser posterior a la fecha de inicio",
+    path: ["endDate"],
+  });
+
+export type ScheduleBlockFormData = z.infer<typeof scheduleBlockSchema>;

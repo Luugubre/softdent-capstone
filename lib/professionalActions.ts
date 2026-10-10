@@ -174,7 +174,7 @@ export async function toggleProfessionalStatus(
         where: {
           professionalId: id,
           date: { gte: new Date() },
-          status: { in: ["AGENDADO", "CONFIRMADA", "PENDIENTE"] },
+          status: { in: ["AGENDADA", "CONFIRMADA", "EN_ATENCION"] },
         },
       });
 

@@ -3,7 +3,7 @@ import { PrismaClient, Role } from '@prisma/client'
 const prisma = new PrismaClient()
 
 async function main() {
-  // 1. Asegurarnos de que existan usuarios base para los distintos roles
+  // 1. Usuarios base
   const usuariosBase = [
     { email: 'juan.perez@dignidad.cl', name: 'Juan Pérez', role: Role.DENTISTA },
     { email: 'admin@dignidad.cl', name: 'Admin Clínica', role: Role.ADMIN },
@@ -26,7 +26,7 @@ async function main() {
   }
   console.log('✅ Usuarios base creados/verificados con sus roles')
 
-  // 2. Crear aranceles básicos
+  // 2. Aranceles básicos
   const tratamientos = [
     { name: 'Exodoncia Simple', price: 25000, category: 'Cirugía' },
     { name: 'Restauración Resina Simple', price: 35000, category: 'Operatoria' },
@@ -35,7 +35,6 @@ async function main() {
   ]
 
   for (const t of tratamientos) {
-    // Usamos findFirst para no duplicar si corremos el script varias veces
     const existe = await prisma.treatment.findFirst({ where: { name: t.name } })
     if (!existe) {
       await prisma.treatment.create({ data: t })
@@ -43,7 +42,7 @@ async function main() {
   }
   console.log('✅ Catálogo de aranceles cargado')
 
-  // 3. Crear catálogo de Especialidades
+  // 3. Especialidades
   const especialidades = [
     'Odontología General',
     'Endodoncia',
@@ -73,7 +72,7 @@ async function main() {
   }
   console.log('✅ Catálogo de especialidades cargado')
 
-  // 4. Crear perfil de Profesional para el usuario existente
+  // 4. Perfil de Profesional
   if (especialidadGeneralId && dentista) {
     await prisma.professional.upsert({
       where: { rut: '12345678-9' },
@@ -87,7 +86,7 @@ async function main() {
         professionalRegister: 'RNPI-102938',
         email: dentista.email,
         phone: '+56 9 1234 5678',
-        role: Role.DENTISTA, // ✅ Se especifica el rol
+        role: Role.DENTISTA,
         active: true,
         specialtyId: especialidadGeneralId,
         userId: dentista.id,
@@ -95,6 +94,49 @@ async function main() {
     })
     console.log('✅ Registro de profesional vinculado al usuario')
   }
+
+  // 5. NUEVO: Boxes de Atención de la Clínica
+  const boxes = [
+    { name: 'Box 1 - Odontología General' },
+    { name: 'Box 2 - Ortodoncia' },
+    { name: 'Box 3 - Pabellón Cirugía' },
+  ]
+
+  for (const b of boxes) {
+    const existeBox = await prisma.box.findFirst({ where: { name: b.name } })
+    if (!existeBox) {
+      await prisma.box.create({
+        data: {
+          name: b.name,
+          active: true,
+        },
+      })
+    }
+  }
+  console.log('✅ Boxes de atención cargados')
+
+  // 6. NUEVO: Procedimientos / Prestaciones Clínicas para Agendamiento
+  const procedimientos = [
+    { name: 'Consulta General / Evaluación', durationMin: 30, price: 25000 },
+    { name: 'Limpieza Dental (Profilaxis)', durationMin: 45, price: 35000 },
+    { name: 'Obturación / Tapadura Simple', durationMin: 60, price: 45000 },
+    { name: 'Control Ortodoncia', durationMin: 30, price: 30000 },
+  ]
+
+  for (const p of procedimientos) {
+    const existeProc = await prisma.procedure.findFirst({ where: { name: p.name } })
+    if (!existeProc) {
+      await prisma.procedure.create({
+        data: {
+          name: p.name,
+          durationMin: p.durationMin,
+          price: p.price,
+          active: true,
+        },
+      })
+    }
+  }
+  console.log('✅ Catálogo de procedimientos cargado')
 }
 
 main()

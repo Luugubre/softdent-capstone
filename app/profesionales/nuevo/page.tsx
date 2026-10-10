@@ -1,15 +1,16 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { createProfessional } from '@/lib/actions'
+import { createProfessional } from '@/lib/professionalActions'
+
+type RoleType = 'ADMIN' | 'DENTISTA' | 'RECEPCIONISTA'
 
 export default function NuevoProfesionalPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
-  const [selectedRole, setSelectedRole] = useState<'ADMIN' | 'DENTISTA' | 'RECEPCIONISTA'>('DENTISTA')
+  const [selectedRole, setSelectedRole] = useState<RoleType>('DENTISTA')
   
-  // 1. Creamos una referencia para el formulario
   const formRef = useRef<HTMLFormElement>(null)
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -21,12 +22,17 @@ export default function NuevoProfesionalPage() {
     const formData = new FormData(event.currentTarget)
     
     const commissionValue = selectedRole === 'DENTISTA' 
-      ? parseFloat(formData.get('commission') as string) 
+      ? parseFloat(formData.get('commission') as string || '0') 
       : 0
 
     const data = {
-      name: formData.get('name') as string,
+      firstName: formData.get('firstName') as string,
+      lastName: formData.get('lastName') as string,
+      rut: formData.get('rut') as string,
       email: formData.get('email') as string,
+      phone: (formData.get('phone') as string) || '',
+      specialty: (formData.get('specialty') as string) || '',
+      professionalRegister: (formData.get('professionalRegister') as string) || '',
       role: selectedRole,
       commission: commissionValue
     }
@@ -39,7 +45,6 @@ export default function NuevoProfesionalPage() {
     } else {
       setSuccess(true)
       setLoading(false)
-      // 2. Usamos la referencia para limpiar el formulario de forma segura
       formRef.current?.reset()
       setSelectedRole('DENTISTA')
     }
@@ -50,7 +55,7 @@ export default function NuevoProfesionalPage() {
       <h1 className="text-2xl font-bold text-gray-800 mb-6">Registrar Nuevo Profesional</h1>
       
       {error && (
-        <div className="mb-4 p-4 bg-red-50 text-red-700 rounded-md text-sm border border-red-100">
+        <div className="mb-4 p-4 bg-red-50 text-red-700 rounded-md text-sm border border-red-100 font-medium">
           {error}
         </div>
       )}
@@ -61,52 +66,105 @@ export default function NuevoProfesionalPage() {
         </div>
       )}
 
-      {/* 3. Asignamos la referencia al formulario */}
       <form ref={formRef} onSubmit={handleSubmit} className="space-y-5">
-        <div>
-          <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Nombre Completo</label>
-          <input 
-            type="text" 
-            id="name" 
-            name="name" 
-            required
-            className="w-full border border-gray-300 rounded-md px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-            placeholder="Ej. Dr. Juan Pérez o María Gómez"
-          />
-        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="firstName" className="block text-sm font-medium text-gray-700 mb-1">Nombre *</label>
+            <input 
+              type="text" 
+              id="firstName" 
+              name="firstName" 
+              required
+              className="w-full border border-gray-300 rounded-md px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 bg-white"
+              placeholder="Ej. Juan"
+            />
+          </div>
 
-        <div>
-          <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Correo Electrónico</label>
-          <input 
-            type="email" 
-            id="email" 
-            name="email" 
-            required
-            className="w-full border border-gray-300 rounded-md px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-            placeholder="correo@clinica.cl"
-          />
+          <div>
+            <label htmlFor="lastName" className="block text-sm font-medium text-gray-700 mb-1">Apellido *</label>
+            <input 
+              type="text" 
+              id="lastName" 
+              name="lastName" 
+              required
+              className="w-full border border-gray-300 rounded-md px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 bg-white"
+              placeholder="Ej. Pérez"
+            />
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-1">Rol en la Clínica</label>
+            <label htmlFor="rut" className="block text-sm font-medium text-gray-700 mb-1">RUT *</label>
+            <input 
+              type="text" 
+              id="rut" 
+              name="rut" 
+              required
+              className="w-full border border-gray-300 rounded-md px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 bg-white"
+              placeholder="Ej. 12.345.678-9"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Correo Electrónico *</label>
+            <input 
+              type="email" 
+              id="email" 
+              name="email" 
+              required
+              className="w-full border border-gray-300 rounded-md px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 bg-white"
+              placeholder="correo@clinica.cl"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="professionalRegister" className="block text-sm font-medium text-gray-700 mb-1">
+              N° Registro Minsal / SIS
+            </label>
+            <input 
+              type="text" 
+              id="professionalRegister" 
+              name="professionalRegister" 
+              className="w-full border border-gray-300 rounded-md px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 bg-white"
+              placeholder="Ej. 123456 (Opcional)"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-1">Teléfono</label>
+            <input 
+              type="text" 
+              id="phone" 
+              name="phone" 
+              className="w-full border border-gray-300 rounded-md px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 bg-white"
+              placeholder="+56 9 1234 5678 (Opcional)"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-1">Rol en la Clínica *</label>
             <select 
               id="role" 
               name="role" 
               value={selectedRole}
-              onChange={(e) => setSelectedRole(e.target.value as any)}
+              onChange={(e) => setSelectedRole(e.target.value as RoleType)}
               required
-              className="w-full border border-gray-300 rounded-md px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+              className="w-full border border-gray-300 rounded-md px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900 font-medium"
             >
-              <option value="DENTISTA">Dentista</option>
-              <option value="RECEPCIONISTA">Recepcionista</option>
-              <option value="ADMIN">Administrador</option>
+              <option value="DENTISTA" className="text-gray-900">Dentista</option>
+              <option value="RECEPCIONISTA" className="text-gray-900">Recepcionista</option>
+              <option value="ADMIN" className="text-gray-900">Administrador</option>
             </select>
           </div>
 
           {selectedRole === 'DENTISTA' && (
             <div className="animate-in fade-in zoom-in duration-200">
-              <label htmlFor="commission" className="block text-sm font-medium text-gray-700 mb-1">Comisión (%)</label>
+              <label htmlFor="commission" className="block text-sm font-medium text-gray-700 mb-1">Comisión (%) *</label>
               <input 
                 type="number" 
                 id="commission" 
@@ -116,7 +174,7 @@ export default function NuevoProfesionalPage() {
                 step="0.1"
                 defaultValue="40.0"
                 required={selectedRole === 'DENTISTA'}
-                className="w-full border border-gray-300 rounded-md px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full border border-gray-300 rounded-md px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 bg-white"
               />
               <p className="text-xs text-gray-500 mt-1">Porcentaje de ganancia por tratamiento.</p>
             </div>

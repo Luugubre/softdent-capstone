@@ -7,65 +7,70 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Role {
-  ADMIN
-  DENTISTA
-  RECEPCIONISTA
-  ASISTENTE
-}
-
 model User {
-  id         String @id @default(uuid())
-  email      String @unique
-  name       String
-  role       Role   @default(DENTISTA)
-  commission Float  @default(40.0)
-
-  appointments Appointment[]
-  budgets      Budget[]
-  payrolls     Payroll[]
-  createdAt    DateTime      @default(now())
-  professional Professional?
+  id              String            @id @default(uuid())
+  email           String            @unique
+  name            String
+  role            Role              @default(DENTISTA)
+  createdAt       DateTime          @default(now())
+  commission      Float             @default(40.0)
+  budgets         Budget[]
+  Evolution       Evolution[]
+  PatientDocument PatientDocument[]
+  payrolls        Payroll[]
+  Prescription    Prescription[]
+  professional    Professional?
 }
 
 model Patient {
-  id        String    @id @default(uuid())
-  rut       String    @unique // RUT normalizado (sin puntos, con guion)
-  firstName String
-  lastName  String
-  email     String? // Se quita @unique para permitir opcionalidad/avisos
-  phone     String?
-  birthDate DateTime? // Necesario para coincidencia probable de duplicados
-  prevision String    @default("Particular") // Relacionado con los catálogos
-  active    Boolean   @default(true) // Control para desactivación lógica
+  id              String            @id @default(uuid())
+  rut             String            @unique
+  firstName       String
+  lastName        String
+  phone           String?
+  odontogram      Json?
+  createdAt       DateTime          @default(now())
+  email           String?
+  active          Boolean           @default(true)
+  birthDate       DateTime?
+  prevision       String            @default("Particular")
+  updatedAt       DateTime          @default(now()) @updatedAt
+  appointments    Appointment[]
+  budgets         Budget[]
+  Consent         Consent[]
+  Evolution       Evolution[]
+  MedicalHistory  MedicalHistory?
+  PatientDocument PatientDocument[]
+  PatientFile     PatientFile[]
+  Prescription    Prescription[]
 
-  odontogram   Json?
-  appointments Appointment[]
-  budgets      Budget[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt // <-- Agrega @default(now())
-
-  @@index([firstName, lastName]) // Índice para optimizar búsquedas por nombre
+  @@index([firstName, lastName])
 }
 
 model Appointment {
-  id       String   @id @default(uuid())
-  date     DateTime
-  duration Int      @default(30)
-  status   String   @default("AGENDADO")
-  notes    String?
-
-  patientId String
-  patient   Patient @relation(fields: [patientId], references: [id])
-
-  dentistId String
-  dentist   User   @relation(fields: [dentistId], references: [id])
-
-  professionalId String?
-  professional   Professional? @relation(fields: [professionalId], references: [id])
-
-  createdAt DateTime @default(now())
+  id                    String        @id @default(cuid())
+  date                  DateTime
+  status                String        @default("AGENDADO")
+  patientId             String
+  dentistId             String?
+  createdAt             DateTime      @default(now())
+  duration              Int           @default(30)
+  notes                 String?
+  professionalId        String?
+  endDate               DateTime?
+  durationMin           Int?          @default(30)
+  boxId                 String?
+  procedureId           String?
+  isOverbook            Boolean       @default(false)
+  overbookReason        String?
+  cancelReason          String?
+  originalAppointmentId String?       @unique
+  box                   Box?          @relation(fields: [boxId], references: [id], onDelete: Restrict)
+  originalAppointment   Appointment?  @relation("AppointmentHistory", fields: [originalAppointmentId], references: [id])
+  rescheduledTo         Appointment?  @relation("AppointmentHistory")
+  patient               Patient       @relation(fields: [patientId], references: [id])
+  procedure             Procedure?    @relation(fields: [procedureId], references: [id], onDelete: Restrict)
+  professional          Professional? @relation(fields: [professionalId], references: [id])
 }
 
 model Treatment {
@@ -77,42 +82,42 @@ model Treatment {
 }
 
 model Budget {
-  id     String @id @default(uuid())
-  total  Int    @default(0)
-  paid   Int    @default(0)
-  status String @default("PENDIENTE")
-
+  id        String       @id @default(uuid())
+  total     Int          @default(0)
+  status    String       @default("PENDIENTE")
   patientId String
-  patient   Patient @relation(fields: [patientId], references: [id])
-
   dentistId String
-  dentist   User   @relation(fields: [dentistId], references: [id])
-
-  items     BudgetItem[]
-  payments  Payment[]
   createdAt DateTime     @default(now())
+  paid      Int          @default(0)
+  name      String       @default("Plan de tratamiento")
+  notes     String?
+  dentist   User         @relation(fields: [dentistId], references: [id])
+  patient   Patient      @relation(fields: [patientId], references: [id])
+  items     BudgetItem[]
+  Consent   Consent[]
+  Evolution Evolution[]
+  payments  Payment[]
 }
 
 model Payment {
-  id     String @id @default(uuid())
-  amount Int
-  method String
-
-  budgetId String
-  budget   Budget @relation(fields: [budgetId], references: [id])
-
+  id        String   @id @default(uuid())
+  amount    Int
+  method    String
+  budgetId  String
   createdAt DateTime @default(now())
+  budget    Budget   @relation(fields: [budgetId], references: [id])
 }
 
 model BudgetItem {
-  id    String @id @default(uuid())
-  tooth Int?
-  price Int
-
-  budgetId String
-  budget   Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
-
+  id          String    @id @default(uuid())
+  tooth       Int?
+  price       Int
+  budgetId    String
   treatmentId String
+  completedAt DateTime?
+  status      String    @default("PENDIENTE")
+  surfaces    String[]  @default([])
+  budget      Budget    @relation(fields: [budgetId], references: [id], onDelete: Cascade)
   treatment   Treatment @relation(fields: [treatmentId], references: [id])
 }
 
@@ -121,39 +126,196 @@ model Payroll {
   period    String
   totalPaid Int
   status    String    @default("BORRADOR")
-  closedAt  DateTime?
-
   dentistId String
-  dentist   User   @relation(fields: [dentistId], references: [id])
-
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
+  closedAt  DateTime?
+  dentist   User      @relation(fields: [dentistId], references: [id])
 }
 
 model Specialty {
   id            String         @id @default(uuid())
   name          String         @unique
   active        Boolean        @default(true)
-  professionals Professional[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
+  professionals Professional[]
 }
 
 model Professional {
-  id                   String     @id @default(cuid())
+  id                   String            @id @default(cuid())
+  rut                  String            @unique
   firstName            String
   lastName             String
-  rut                  String     @unique
-  professionalRegister String     @unique
+  specialtyId          String?
+  professionalRegister String            @unique
   email                String?
   phone                String?
+  userId               String?           @unique
+  active               Boolean           @default(true)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  role                 Role              @default(DENTISTA)
   birthDate            DateTime?
-  role                 Role       @default(DENTISTA)
-  active               Boolean    @default(true)
-  specialtyId          String?    
-  specialty            Specialty? @relation(fields: [specialtyId], references: [id]) 
-  userId               String?    @unique
-  user                 User?      @relation(fields: [userId], references: [id])
   appointments         Appointment[]
-  createdAt            DateTime   @default(now())
-  updatedAt            DateTime   @updatedAt
+  specialty            Specialty?        @relation(fields: [specialtyId], references: [id], onDelete: Restrict)
+  user                 User?             @relation(fields: [userId], references: [id])
+  blocks               ScheduleBlock[]
+  schedules            WorkingSchedule[]
+}
+
+model Box {
+  id           String          @id @default(cuid())
+  name         String          @unique
+  active       Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @default(now()) @updatedAt
+  appointments Appointment[]
+  blocks       ScheduleBlock[]
+}
+
+model Procedure {
+  id           String        @id @default(cuid())
+  name         String
+  durationMin  Int           @default(30)
+  price        Int           @default(0)
+  active       Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @default(now()) @updatedAt
+  appointments Appointment[]
+}
+
+model WorkingSchedule {
+  id             String       @id @default(cuid())
+  professionalId String
+  dayOfWeek      Int
+  startTime      String
+  endTime        String
+  active         Boolean      @default(true)
+  professional   Professional @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@unique([professionalId, dayOfWeek])
+}
+
+model ScheduleBlock {
+  id             String            @id @default(cuid())
+  reason         String
+  type           ScheduleBlockType @default(OTRO)
+  startDate      DateTime
+  endDate        DateTime
+  professionalId String?
+  boxId          String?
+  createdAt      DateTime          @default(now())
+  box            Box?              @relation(fields: [boxId], references: [id])
+  professional   Professional?     @relation(fields: [professionalId], references: [id])
+}
+
+model Consent {
+  id        String    @id
+  patientId String
+  budgetId  String?
+  title     String
+  content   String
+  status    String    @default("PENDIENTE")
+  signedAt  DateTime?
+  createdAt DateTime  @default(now())
+  Budget    Budget?   @relation(fields: [budgetId], references: [id])
+  Patient   Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+}
+
+model Evolution {
+  id        String   @id
+  patientId String
+  dentistId String?
+  budgetId  String?
+  date      DateTime @default(now())
+  content   String
+  createdAt DateTime @default(now())
+  Budget    Budget?  @relation(fields: [budgetId], references: [id])
+  User      User?    @relation(fields: [dentistId], references: [id])
+  Patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+}
+
+model MedicalHistory {
+  id           String   @id
+  patientId    String   @unique
+  conditions   String[] @default([])
+  allergies    String?
+  medications  String?
+  surgeries    String?
+  habits       String?
+  smoker       Boolean  @default(false)
+  pregnant     Boolean  @default(false)
+  observations String?
+  updatedAt    DateTime @default(now())
+  Patient      Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+}
+
+model PatientDocument {
+  id        String   @id
+  patientId String
+  dentistId String?
+  type      String   @default("CERTIFICADO")
+  title     String
+  content   String
+  createdAt DateTime @default(now())
+  User      User?    @relation(fields: [dentistId], references: [id])
+  Patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+}
+
+model PatientFile {
+  id        String   @id
+  patientId String
+  name      String
+  category  String   @default("RADIOGRAFIA")
+  mimeType  String
+  size      Int
+  data      Bytes
+  notes     String?
+  createdAt DateTime @default(now())
+  Patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+}
+
+model Prescription {
+  id           String   @id
+  patientId    String
+  dentistId    String?
+  medications  Json
+  instructions String?
+  createdAt    DateTime @default(now())
+  User         User?    @relation(fields: [dentistId], references: [id])
+  Patient      Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+}
+
+enum Role {
+  ADMIN
+  DENTISTA
+  RECEPCIONISTA
+  ASISTENTE
+}
+
+enum AppointmentStatus {
+  AGENDADA
+  CONFIRMADA
+  EN_ATENCION
+  ATENDIDA
+  REAGENDADA
+  CANCELADA
+  NO_ASISTIO
+}
+
+enum ScheduleBlockType {
+  VACACIONES
+  REUNION
+  MANTENCION
+  OTRO
 }
